@@ -3,9 +3,10 @@ import json
 from dotenv import load_dotenv
 from utils.ml_autenticacao import atualizar_token_com_refresh_token
 from utils.gera_excel import converter_json_para_excel
-from utils.tratamento_de_dados import cria_dataframe_com_dados_dos_pedidos
-from utils.api_mercado_livre import consulta_pedido_por_pedido, get_periodos, get_user_id, get_order_by_period
+from utils.tratamento_de_dados import cria_dataframe_com_dados_dos_pedidos, consilida_dados_dos_pedidos
+from utils.api_mercado_livre import consulta_pedido_por_pedido, get_periodos, get_user_id, get_order_by_period, consulta_dados_cliente, get_billing_info
 from utils.api_mercadolivre_testes import get_nf_by_order_id, get_all_shipmentts_info
+from utils.acesso_webmais import consulta_numero_nf_por_doc_cliente
 import os
 from datetime import datetime, UTC
 
@@ -18,7 +19,7 @@ def cria_relatorio(ACCESS_TOKEN, period_key):
     response = get_order_by_period(ACCESS_TOKEN, period_key)
     # print(response)
 
-    df_pedidos = cria_df_com_dados_dos_pedidos(response)  # retorna lista de orders
+    df_pedidos = cria_dataframe_com_dados_dos_pedidos(response)  # retorna lista de orders
 
     # Consulta pedido por pedido e salva todos no arquivo pedidos.json
     consulta_pedido_por_pedido(ACCESS_TOKEN, df_pedidos, period_key)
@@ -40,21 +41,41 @@ if __name__ == "__main__":
 
     ACCESS_TOKEN = os.getenv("ML_ACCESSTOKEN")
 
+    # shipping_id = '44514909514'
+    # response = get_billing_info(ACCESS_TOKEN, shipping_id)
+    # print(response)
+    #
+    # order_id = '2000011055531640'
+    # response = consulta_dados_cliente(ACCESS_TOKEN, order_id)
+    # print(response)
+    #
+    # shipping_id = '44514719410'
+    # # shipping_response = get_billing_info(ACCESS_TOKEN, shipping_id)
+    # shipping_response = get_all_shipmentts_info(ACCESS_TOKEN, shipping_id)
+    # print(shipping_response)
+
 
     # USER_ID = get_user_id(ACCESS_TOKEN)  # Você pode obter esse ID com /users/me
     # print(USER_ID)
 
     # Pega os períodos
-    period_keys = get_periodos(ACCESS_TOKEN, 2)
-    print(period_keys)
-
+    # period_keys = get_periodos(ACCESS_TOKEN, 2)
+    # print(period_keys)
+    period_keys = ['2025-03-01']
 
     for period_key in period_keys:
-        cria_relatorio(ACCESS_TOKEN, period_key)
+        # cria_relatorio(ACCESS_TOKEN, period_key)
 
         arquivo_json = f"../dados/dados_relatorio_{period_key}.json"  # Substitua pelo caminho do seu arquivo JSON
+        arquivo_json_consolidado = f"../dados/dados_relatorio_consolidado_{period_key}.json"  # Substitua pelo caminho do seu arquivo JSON
         arquivo_excel = f"../dados/Vendas_Online_{period_key}.xlsx"  # Nome do arquivo Excel de saída
-        converter_json_para_excel(arquivo_json, arquivo_excel)
+
+        # Cria o json consolidado
+        consilida_dados_dos_pedidos(arquivo_json, arquivo_json_consolidado)
+
+        consulta_numero_nf_por_doc_cliente(arquivo_json_consolidado)
+
+        converter_json_para_excel(arquivo_json_consolidado, arquivo_excel)
 
 
 

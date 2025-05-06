@@ -1,5 +1,5 @@
 import requests
-import pandas as np
+import numpy as np
 import json
 from time import sleep
 from utils.logger import logging
@@ -137,6 +137,8 @@ def get_billing_info(ACCESS_TOKEN, shipping_id):
     for tentativa in range(3):
         try:
             response = requests.get(API_URL, headers=headers, timeout=10)
+            if response.status_code == 404:
+                return {}
             response.raise_for_status()
             return response.json()
         except (requests.exceptions.RequestException, requests.exceptions.ConnectTimeout) as e:
@@ -184,19 +186,64 @@ def consulta_pedido_por_pedido(ACCESS_TOKEN, df_pedidos, period_key):
         response_order = get_order_by_id(ACCESS_TOKEN, order_id)
         order_status = response_order['status']
 
+        shipping_response = {}
+        shipping_cost_response = {}
+
         # print(response)
         shipping_id = response_order['shipping'].get('id', '')
-        if not shipping_id:
-            retorno_cliente = consulta_dados_cliente(ACCESS_TOKEN, order_id)
-            response_order['cliente_doc_type'] = retorno_cliente['billing_info'].get('doc_type', '')
-            relatorio['cliente_doc_type'] = retorno_cliente['billing_info'].get('doc_type', '')
-            response_order['cliente_doc_number'] = retorno_cliente['billing_info'].get('doc_number', '')
-            relatorio['cliente_doc_number'] = retorno_cliente['billing_info'].get('doc_number', '')
-
-
         relatorio["shipping_id"] = shipping_id
-        shipping_response = get_billing_info(ACCESS_TOKEN, shipping_id)
-        # print(shipping_response)
+        print(f'Shipping ID: {shipping_id}')
+        if shipping_id is not None and shipping_id != '':
+            print("Consultando get_billing_info")
+            shipping_response = get_billing_info(ACCESS_TOKEN, shipping_id)
+            print(f"get_billing_cost_info - Invoice Number: {shipping_response.get('invoice_number', '')}  -  Valor: : {shipping_response.get('invoice_amount', '')}")
+            shipping_cost_response = get_billing_cost_info(ACCESS_TOKEN, shipping_id)
+
+        invoice_number = shipping_response.get('invoice_number', '')
+        invoice_amount = shipping_response.get('invoice_amount', '')
+        frete_cliente = shipping_cost_response.get('receiver', {}).get("cost", 0)
+        frete_empresa = sum(item.get("cost", 0) for item in shipping_cost_response.get('senders', []))
+
+        print("consultando dados do cliente")
+        retorno_cliente = consulta_dados_cliente(ACCESS_TOKEN, order_id)
+        response_order['cliente_doc_type'] = retorno_cliente['billing_info'].get('doc_type', '')
+        relatorio['cliente_doc_type'] = retorno_cliente['billing_info'].get('doc_type', '')
+        response_order['cliente_doc_number'] = retorno_cliente['billing_info'].get('doc_number', '')
+        relatorio['cliente_doc_number'] = retorno_cliente['billing_info'].get('doc_number', '')
+
+        nome_completo ='@@@@@@@@@@@@@@@@@  errro  @@@@@@@@@@@@@@@@@@@@@'
+        # Extrai od dados da consulta_dados_cliente
+        info = retorno_cliente['billing_info'].get('additional_info', [])
+        # Encontra o índice do primeiro BILLING_INFO_ID
+        indice_billing_info = next(
+            (i for i, item in enumerate(info) if item.get("type") in ["FIRST_NAME", "BUSINESS_NAME"]),
+            None
+        )
+
+        if indice_billing_info is not None:
+            # Só busca os nomes nos itens seguintes
+            info_restante = info[indice_billing_info + 0:]
+
+            def extrair_valor_por_tipo(additional_info, tipo):
+                for item in additional_info:
+                    if item["type"] == tipo:
+                        return item.get("value", "").strip()
+                return ""
+
+            primeiro_nome = extrair_valor_por_tipo(info_restante, "FIRST_NAME")
+            sobrenome = extrair_valor_por_tipo(info_restante, "LAST_NAME")
+            business_name = extrair_valor_por_tipo(info_restante, "BUSINESS_NAME")
+            nome_completo = f"{primeiro_nome.strip()} {sobrenome.strip()}".strip()
+            if nome_completo == '':
+                nome_completo = business_name.strip()
+            response_order['nome_cliente_nf'] = nome_completo
+
+        print(f"NOME COMPLETO!!!!!!!!!     {nome_completo}")
+        if nome_completo =='@@@@@@@@@@@@@@@@@  errro  @@@@@@@@@@@@@@@@@@@@@':
+            print(retorno_cliente)
+            print()
+        relatorio['nome_cliente_nf'] = nome_completo
+
         total_amount = response_order['total_amount']
         paid_amount = response_order['paid_amount']
         pack_id = response_order.get('pack_id', '')
@@ -204,17 +251,14 @@ def consulta_pedido_por_pedido(ACCESS_TOKEN, df_pedidos, period_key):
         relatorio["paid_amount"] = paid_amount
         relatorio["pack_id"] = pack_id
 
-        invoice_number = shipping_response.get('invoice_number', '')
-        invoice_amount = shipping_response.get('invoice_amount', '')
         response_order['invoice_number'] = invoice_number
         response_order['invoice_amount'] = invoice_amount
         relatorio["invoice_number"] = invoice_number
         relatorio["invoice_amount"] = invoice_amount
-        shipping_cost_response = get_billing_cost_info(ACCESS_TOKEN, shipping_id)
+
         # print("Shipping cost response: ")
         # print(shipping_cost_response)
-        frete_cliente = shipping_cost_response.get('receiver', {}).get("cost", 0)
-        frete_empresa = sum(item.get("cost", 0) for item in shipping_cost_response.get('senders', []))
+
 
         marketplace_fee = sum(item.get("marketplace_fee", 0) for item in response_order.get('payments', []))
 

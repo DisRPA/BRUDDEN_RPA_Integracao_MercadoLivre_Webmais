@@ -3,7 +3,29 @@ from utils.ml_autenticacao import atualizar_token_com_refresh_token
 import os
 import json
 from datetime import datetime, UTC
+from dotenv import load_dotenv
 
+
+def get_user_id(ACCESS_TOKEN):
+    # URL para obter informações do usuário logado
+    API_URL = "https://api.mercadolibre.com/users/me"
+
+    # Headers com autenticação
+    headers = {
+        "Authorization": f"Bearer {ACCESS_TOKEN}"
+    }
+
+    # Fazer requisição para obter o User ID
+    response = requests.get(API_URL, headers=headers)
+
+    # Verificar se a requisição foi bem-sucedida
+    if response.status_code == 200:
+        user_data = response.json()
+        user_id = user_data.get("id")
+        print(f"Seu User ID no Mercado Livre é: {user_id}")
+        return user_id
+    else:
+        print(f"Erro ao obter User ID: {response.text}")
 
 def consulta_teste(ACCESS_TOKEN):
     # URL para obter produtos ativos (à venda)
@@ -107,8 +129,57 @@ def consulta_produtos(USER_ID, ACCESS_TOKEN):
         print(f"Erro ao buscar produtos: {response.text}")
 
 
+def consulta_catalogo(ACCESS_TOKEN, USER_ID):
+    API_URL = f'https://api.mercadolibre.com/users/{USER_ID}/items/search'
+
+    # Headers com autenticação
+    headers = {
+        "Authorization": f"Bearer {ACCESS_TOKEN}"
+    }
+
+    # Fazer requisição para obter os produtos
+    response = requests.get(API_URL, headers=headers)
+
+    return response.json()
+
+
+def consulta_item(ACCESS_TOKEN, item_id):
+    API_URL = f'https://api.mercadolibre.com/items/{item_id}'
+
+    # Headers com autenticação
+    headers = {
+        "Authorization": f"Bearer {ACCESS_TOKEN}"
+    }
+
+    # Fazer requisição para obter os produtos
+    response = requests.get(API_URL, headers=headers)
+
+    return response.json()
+
+
+def atualiza_quantidade(ACCESS_TOKEN, USER_ID, item_id, variation_id, qtd_disponivel):
+    url = f"https://api.mercadolibre.com/users/{USER_ID}/items/{item_id}"
+
+    headers = {
+        "Authorization": f"Bearer {ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "variations": [{
+            "id": variation_id,
+            "available_quantity": qtd_disponivel
+        }]
+    }
+
+    response = requests.put(url, headers=headers, json=payload)
+    return response.json()
+
 
 if __name__ == "__main__":
+    # Carregar as variáveis de ambiente do arquivo .env
+    load_dotenv()
+
+
     expiration_str = os.getenv("ML_ACCESSTOKEN_EXPIRATION")
     if not expiration_str:
         atualizar_token_com_refresh_token()
@@ -124,4 +195,30 @@ if __name__ == "__main__":
 
     ACCESS_TOKEN = os.getenv("ML_ACCESSTOKEN")
 
+    # USER_ID = get_user_id(ACCESS_TOKEN)
+    USER_ID = os.getenv("ML_USER_ID")
 
+    item_id = 'MLB1057329288'
+    # retorno = consulta_item(ACCESS_TOKEN, item_id)
+    # print(retorno)
+
+
+    variation_id = '174142503960'
+    qtd_disponivel = 1  # 50
+    retorno = atualiza_quantidade(ACCESS_TOKEN, USER_ID, item_id, variation_id, qtd_disponivel)
+    print(retorno)
+
+    qtd_disponivel = 1  # 50
+    retorno = atualiza_quantidade(ACCESS_TOKEN, item_id, variation_id, qtd_disponivel)
+    print(retorno)
+
+
+    consulta_produtos(USER_ID, ACCESS_TOKEN)
+
+
+
+
+    response = consulta_catalogo(ACCESS_TOKEN, USER_ID)
+    print(response)
+
+    print("fim")
