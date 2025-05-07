@@ -61,7 +61,7 @@ if __name__ == "__main__":
     # Pega os períodos
     # period_keys = get_periodos(ACCESS_TOKEN, 2)
     # print(period_keys)
-    period_keys = ['2025-03-01']
+    period_keys = ['2025-04-01']
 
     for period_key in period_keys:
         # cria_relatorio(ACCESS_TOKEN, period_key)

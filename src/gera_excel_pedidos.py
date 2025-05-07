@@ -374,6 +374,41 @@ def processar_multiplos_pedidos(dados_lista):
     return todas_tabelas
 
 
+# Função para verificar se todos os campos necessários existem
+def validar_pedido(dados):
+    """
+    Valida se um pedido tem os campos necessários antes de processá-lo
+    """
+    campos_obrigatorios = ['id']
+
+    for campo in campos_obrigatorios:
+        if campo not in dados:
+            return False
+
+    return True
+
+
+# Função para processar um arquivo JSON com múltiplos pedidos
+def processar_arquivo_json(arquivo):
+    """
+    Processa um arquivo JSON que contém múltiplos pedidos
+    """
+    dados = carregar_json(arquivo_json=arquivo)
+
+    # Verificar se o JSON é uma lista ou um objeto único
+    if isinstance(dados, list):
+        # Filtrar apenas dados válidos
+        dados_validos = [pedido for pedido in dados if validar_pedido(pedido)]
+        return processar_multiplos_pedidos(dados_validos)
+    else:
+        # É um único objeto
+        if validar_pedido(dados):
+            return processar_json_para_tabelas(dados)
+        else:
+            print("O objeto JSON não contém os campos necessários!")
+            return {}
+
+
 # Exemplo de uso
 def main():
     # Você pode usar esta função para testar o código
@@ -411,39 +446,7 @@ def main():
         print(f"- {nome}: {len(df)} linhas, {len(df.columns)} colunas")
 
 
-# Função para verificar se todos os campos necessários existem
-def validar_pedido(dados):
-    """
-    Valida se um pedido tem os campos necessários antes de processá-lo
-    """
-    campos_obrigatorios = ['id']
 
-    for campo in campos_obrigatorios:
-        if campo not in dados:
-            return False
-
-    return True
-
-
-# Função para processar um arquivo JSON com múltiplos pedidos
-def processar_arquivo_json(arquivo):
-    """
-    Processa um arquivo JSON que contém múltiplos pedidos
-    """
-    dados = carregar_json(arquivo_json=arquivo)
-
-    # Verificar se o JSON é uma lista ou um objeto único
-    if isinstance(dados, list):
-        # Filtrar apenas dados válidos
-        dados_validos = [pedido for pedido in dados if validar_pedido(pedido)]
-        return processar_multiplos_pedidos(dados_validos)
-    else:
-        # É um único objeto
-        if validar_pedido(dados):
-            return processar_json_para_tabelas(dados)
-        else:
-            print("O objeto JSON não contém os campos necessários!")
-            return {}
 
 
 if __name__ == "__main__":
