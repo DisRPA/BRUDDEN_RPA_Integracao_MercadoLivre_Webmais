@@ -1,13 +1,6 @@
 import pandas as pd
-import numpy as np
-import json
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
-from collections import Counter
-
-
-# Carregando o JSON (assumindo que você já tem o JSON em uma variável chamada 'data')
-# data = json.loads(json_string)
 
 
 # Carregar os dados do JSON
@@ -15,8 +8,14 @@ def converter_json_para_excel(arquivo_json_consolidado, arquivo_excel):
     # Ler o arquivo JSON
     df_consolidado = pd.read_json(arquivo_json_consolidado, orient='records')
 
-    df_consolidado.drop(columns=['Apelido', 'Frete Cliente', 'Status'], inplace=True)
+    # df_consolidado.drop(columns=['Apelido', 'Frete Cliente', 'Status'], inplace=True)
+    df_consolidado.drop(columns=['Apelido', 'Frete Cliente'], inplace=True)
 
+    # Converter Order_ID ML para string para preservar os dígitos
+    df_consolidado['Order_ID ML'] = df_consolidado['Order_ID ML'].astype(str)
+
+    # for index, row in df_consolidado.iterrows():
+    #     print(row["Nome NF"], row["Nota"], row["Valor"], row["Order_ID ML"])
 
     # Definir formatos para colunas com valores numéricos
     colunas_numericas = ['C', 'D', 'E', 'F']

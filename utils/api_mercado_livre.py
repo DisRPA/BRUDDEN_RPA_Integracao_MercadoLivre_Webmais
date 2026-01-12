@@ -260,7 +260,7 @@ def consulta_pedido_por_pedido(ACCESS_TOKEN, df_pedidos, period_key):
         # print(shipping_cost_response)
 
 
-        marketplace_fee = sum(item.get("marketplace_fee", 0) for item in response_order.get('payments', []))
+        marketplace_fee = sum(item.get("sale_fee", 0) for item in response_order.get('order_items', []))
 
 
         response_order['frete_cliente'] = frete_cliente
@@ -289,7 +289,7 @@ def consulta_pedido_por_pedido(ACCESS_TOKEN, df_pedidos, period_key):
     with open(f"../dados/dados_relatorio_{period_key}.json", "w", encoding="utf-8") as f:
         json.dump(all_relatorio, f, ensure_ascii=False, indent=4, default=convert_numpy)
 
-    print("Arquivo 'pedidos.json' salvo com sucesso!")
+    print(f"Arquivo pedidos_{period_key}.json e dados_relatorio_{period_key}.json salvos com sucesso!")
 
 
 def get_order_by_period(ACCESS_TOKEN, period_key):

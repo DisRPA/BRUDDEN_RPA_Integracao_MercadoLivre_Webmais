@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 # Configurações
 CLIENT_ID = "612439810072537"  # FESO   612439810072537
-CLIENT_SECRET = "jBAPjPrFiVBJK0qERZKSE85P3NRNQvgb"  # FESO  jBAPjPrFiVBJK0qERZKSE85P3NRNQvgb
+CLIENT_SECRET = "d1MVjEmCnYdRW6eVB6OSWH5EFtaTuVGh"  # FESO  jBAPjPrFiVBJK0qERZKSE85P3NRNQvgb
 
 REDIRECT_URI = "https://bubblebot.com.br/php/logger.php"
 TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
@@ -23,12 +23,12 @@ def get_access_token(auth_code):
         "grant_type": "authorization_code",
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
-        "scope": "read",
         "code": auth_code,
         "redirect_uri": REDIRECT_URI
     }
     response = requests.post(TOKEN_URL, data=data)
     response_data = response.json()
+
 
     if "access_token" in response_data:
         return {
@@ -89,6 +89,9 @@ def atualizar_token_com_refresh_token():
 
 # Exemplo de uso
 if __name__ == "__main__":
+
+    get_access_token("TG-68c1d0bc92779800016c7fda-276359269")
+
     expiration_str = os.getenv("ML_ACCESSTOKEN_EXPIRATION")
     if not expiration_str:
         atualizar_token_com_refresh_token()

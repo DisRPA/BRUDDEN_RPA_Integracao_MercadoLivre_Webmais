@@ -18,6 +18,11 @@ def cria_dataframe_com_dados_dos_pedidos(data):
     sales_records = []
 
     for item in data['results']:
+
+        if 'sales_info' not in item or item['sales_info'] == "None" or item['sales_info'] is None:
+            print(item)
+            continue
+
         # Gerar um ID único para relacionar as tabelas
         result_id = item['charge_info']['detail_id']  # Usando detail_id como identificador único
 
@@ -59,8 +64,8 @@ def consilida_dados_dos_pedidos(arquivo_json, arquivo_json_consolidado):
         dados = json.load(f)
 
     # Filtrar os dados para remover registros com status "cancelled"
-    dados_filtrados = [item for item in dados if item.get('order_status') != 'cancelled']
-    # dados_filtrados = dados
+    # dados_filtrados = [item for item in dados if item.get('order_status') != 'cancelled']
+    dados_filtrados = dados
 
     order_ids = [item['order_id'] for item in dados_filtrados]
     repetidos = [item for item, count in Counter(order_ids).items() if count > 1]
@@ -167,6 +172,3 @@ def consilida_dados_dos_pedidos(arquivo_json, arquivo_json_consolidado):
     # Salvar o resultado em um arquivo JSON
     # with open(arquivo_json_consolidado, "w", encoding="utf-8") as f:
     #     json.dump(all_relatorio, f, ensure_ascii=False, indent=4, default=convert_numpy)
-
-
-

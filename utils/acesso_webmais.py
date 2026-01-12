@@ -1,4 +1,4 @@
-import logging
+from utils.logger import logging
 from utils.banco_de_dados import atualizar_tabela_com_df_campos_existentes
 from playwright.sync_api import sync_playwright
 from dotenv import load_dotenv
@@ -7,6 +7,16 @@ from time import sleep
 import pandas as pd
 import json
 import os
+
+
+def fecha_popup_caso_exista(page):
+    try:
+        # novo popup
+        page.click('button[title="Close"]', timeout=10000)
+    except Exception as e:
+        pass
+
+    return page
 
 
 def aguardar_pag_carregar_sem_networkidle(page):
@@ -51,34 +61,42 @@ def login_webmais(page):
     page.wait_for_selector('#botaoLogin', state="visible")
     page.click('#botaoLogin')
     page = aguardar_pag_carregar(page)
+
+    page = fecha_popup_caso_exista(page)
+
+    page = aguardar_pag_carregar(page)
+
     return page
 
 
-def selecionar_nota(page, no_nota):
-    page.select_option('select#op', value='6')
+def selecionar_nota(page, no_nota, segunda_tentativa=False):
+    campo = '6'
+    if segunda_tentativa:
+        campo = '1'
+    page.select_option('select#op', value=campo)
 
     page.fill('#txtTexto', "")
     page.fill('#txtTexto', no_nota)
     page.click('#btnPesquisa')
     page = aguardar_pag_carregar_sem_networkidle(page)
-    sleep(0.1)
-    return page
+    sleep(3)
+    return page, segunda_tentativa
 
 
-def lanca_baixa_de_valores(page, row):
+def lanca_baixa_de_valores(page, row, data_do_saque_mercado_livre, segunda_tentativa=False):
 
     # Selecionar nota
     no_nota = row["Nota"]
-    page = selecionar_nota(page, no_nota)
+    page, segunda_tentativa = selecionar_nota(page, no_nota, segunda_tentativa=segunda_tentativa)
 
     iframe = page.frame("centro2")  # Seleciona o iframe pelo id
-
 
     # Valida o valor da nota
     try:
         valor_atual = iframe.input_value('input[name="campo4"]', timeout=1000).replace('.','')
     except:
         valor_atual = '0,00'
+
     valor_total_nota = round(float(row["Valor"]), 2)
     if row["baixa_valor_nota"] == 1:
         valor_total_nota -= round(float(row["Banco"]), 2)
@@ -88,7 +106,10 @@ def lanca_baixa_de_valores(page, row):
         valor_total_nota -= round(float(row["Frete/Taxa"]), 2)
     valor_pendente = f"{abs(valor_total_nota):.2f}".replace(".", ",")
 
-    if valor_atual != valor_pendente:
+    if valor_atual != valor_pendente and not segunda_tentativa:
+        segunda_tentativa = True
+        page, row = lanca_baixa_de_valores(page, row, data_do_saque_mercado_livre, segunda_tentativa=segunda_tentativa)
+    elif valor_atual != valor_pendente:
         logging.error(f"Divergência no valor total da nota {no_nota} - Pendente {valor_pendente} - valor no sistema {valor_atual}")
         return page, row
 
@@ -97,7 +118,11 @@ def lanca_baixa_de_valores(page, row):
     numero_conta_despesa_frete_e_taxa = "5"   # Conta do valor "Frete/Taxa"
     numero_conta_despesa_mercado_pago = "22"  # Conta do valor "Mercado Pago"
 
+    page.fill('#txtDataBaseCom', "")
+    page.fill('#txtDataBaseCom', data_do_saque_mercado_livre)
+
     # Se não foi dado baixa do valor nota
+    # valor_banco = f"{row["Banco"]:.2f}".replace(".", ",")
     valor_banco = f"{row["Banco"]:.2f}".replace(".", ",")
     if row['baixa_valor_nota'] == 0 and valor_banco != '0,00':
         # Banco BRADESCO Feso  para o valor a receber
@@ -113,11 +138,14 @@ def lanca_baixa_de_valores(page, row):
 
         page.click('#btnBaixa')
         page = aguardar_pag_carregar_sem_networkidle(page)
-        sleep(0.1)
+        sleep(1)
         row['baixa_valor_nota'] = 1
 
         df_row = pd.DataFrame([row])
         atualizar_tabela_com_df_campos_existentes(df_row)
+
+    page.fill('#txtDataBaseCom', "")
+    page.fill('#txtDataBaseCom', data_do_saque_mercado_livre)
 
     # Se não foi dado baixa do valor do Mercado Livre
     valor_mercado_pago = f"{row["Mercado Pago"]:.2f}".replace(".", ",")
@@ -138,12 +166,15 @@ def lanca_baixa_de_valores(page, row):
 
         page.click('#btnBaixa')
         page = aguardar_pag_carregar_sem_networkidle(page)
-        sleep(0.1)
+        sleep(1)
         row['baixa_valor_mercado_pago'] = 1
 
         df_row = pd.DataFrame([row])
         atualizar_tabela_com_df_campos_existentes(df_row)
 
+
+    page.fill('#txtDataBaseCom', "")
+    page.fill('#txtDataBaseCom', data_do_saque_mercado_livre)
 
     # Se não foi dado baixa do valor do Frete
     valor_frete_e_taxa = f"{row["Frete/Taxa"]:.2f}".replace(".", ",")
@@ -164,7 +195,7 @@ def lanca_baixa_de_valores(page, row):
 
         page.click('#btnBaixa')
         page = aguardar_pag_carregar_sem_networkidle(page)
-        sleep(0.1)
+        sleep(1)
 
         row['baixa_valor_frete'] = 1
 
@@ -179,8 +210,11 @@ def lanca_baixa_de_valores(page, row):
 
 def navega_para_baixa_de_valores(page, data_do_saque_mercado_livre):
     page.click("i.mdi-currency-usd")
+    sleep(1)
     page.click("#tituloSubNivel6XX70XX0")
+    sleep(1)
     page.click("#tituloSubNivel6XX79XX70")
+    sleep(1)
     page.click("#tituloSubNivel6XX82XX79")
     with page.expect_popup() as popup_info:
         page.click('a[title="Liquidação por Filtro"]')
@@ -191,6 +225,8 @@ def navega_para_baixa_de_valores(page, data_do_saque_mercado_livre):
     # new_page = page.context.pages[-1]
 
     page = aguardar_pag_carregar(page)
+
+    page = fecha_popup_caso_exista(page)
 
     page.fill('#txtDataBaixa', "")
     page.fill('#txtDataBaixa', data_do_saque_mercado_livre)
@@ -219,6 +255,8 @@ def navega_para_consulta_de_clientes(page):
 
     page = aguardar_pag_carregar(page)
 
+    page = fecha_popup_caso_exista(page)
+
     return page
 
 
@@ -236,6 +274,8 @@ def navega_para_liquidacao_por_filtro(page):
     # new_page = page.context.pages[-1]
 
     page = aguardar_pag_carregar(page)
+
+    page = fecha_popup_caso_exista(page)
 
     return page
 
@@ -255,28 +295,30 @@ def navega_para_consulta_de_notas(page):
 
     page = aguardar_pag_carregar(page)
 
+    page = fecha_popup_caso_exista(page)
+
     return page
 
 
-def abre_site_webmais_e_login(p, headless):
+def abre_site_webmais_e_login(page):
     load_dotenv()
 
-    browser = p.chromium.launch(channel="chromium", headless=headless)
-    # browser.new_context(java_script_enabled=True)
-    context = browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edg/114.0.1823.55 Safari/537.36",
-        viewport={'width': 1530, 'height': 860},
-        java_script_enabled=True,
-        bypass_csp=True,  # bypass Content Security Policy
-        ignore_https_errors=True,
-        extra_http_headers={'Accept-Language': 'pt-BR,pt;q=0.9'}
-    )
-
-    page = context.new_page()
-
-    # Faz login no WebMais
-    page.goto("https://erp2.webmaissistemas.com.br/csp/kelt/system/www/index.csp")
-    page = aguardar_pag_carregar(page)
+    # browser = p.chromium.launch(channel="chromium", headless=headless)
+    # # browser.new_context(java_script_enabled=True)
+    # context = browser.new_context(
+    #     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edg/114.0.1823.55 Safari/537.36",
+    #     viewport={'width': 1530, 'height': 860},
+    #     java_script_enabled=True,
+    #     bypass_csp=True,  # bypass Content Security Policy
+    #     ignore_https_errors=True,
+    #     extra_http_headers={'Accept-Language': 'pt-BR,pt;q=0.9'}
+    # )
+    #
+    # page = context.new_page()
+    #
+    # # Faz login no WebMais
+    # page.goto("https://erp2.webmaissistemas.com.br/csp/kelt/system/www/index.csp")
+    # page = aguardar_pag_carregar(page)
 
     page = login_webmais(page)
 
@@ -357,9 +399,9 @@ def consulta_nummero_nf_cliente(page, cod_cliente, valor_nf, data_ini, invoice_n
 
 def consulta_numero_nf_por_doc_cliente(arquivo_json):
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    headless = True
-    if "gugab" in current_dir or "gustavo" in current_dir:
-        headless = False
+    # headless = True
+    # if "gugab" in current_dir or "gustavo" in current_dir:
+    #     headless = False
 
     # Ler o arquivo JSON
     with open(arquivo_json, 'r', encoding='utf-8') as f:
@@ -375,7 +417,11 @@ def consulta_numero_nf_por_doc_cliente(arquivo_json):
         return
 
     with sync_playwright() as p:
-        page = abre_site_webmais_e_login(p, headless)
+        browser = p.chromium.connect_over_cdp("http://localhost:9222")
+        context = browser.contexts[0]  # contexto persistente do perfil aberto
+        page = context.pages[0]
+
+        page = abre_site_webmais_e_login(page)
 
         page = navega_para_consulta_de_clientes(page)
 
@@ -395,13 +441,18 @@ def consulta_numero_nf_por_doc_cliente(arquivo_json):
         data_ini = (datetime.today() - timedelta(days=60)).strftime('%d/%m/%Y')
 
         for item in dados:
+            # if item["Apelido"] == "GABRIEL ANDRADE_P":
+            #     print(f"Cliente {item["Apelido"]}")
             if item.get('Cod. Cliente WebMais') is not None and item.get('No. Pedido WebMais', None) is None:
                 cod_cliente = item['Cod. Cliente WebMais']
                 valor_nf = item['Valor']
                 invoice_number = item['Nota']
                 page, nota, nr_pedido = consulta_nummero_nf_cliente(page, cod_cliente, valor_nf, data_ini, invoice_number)
-                item['Nota'] = int(nota)
-                item['No. Pedido WebMais'] = int(nr_pedido)
+                if nota:
+                    item['Nota'] = int(nota)
+
+                if nr_pedido:
+                    item['No. Pedido WebMais'] = int(nr_pedido)
 
         # Atualiza o arquivo Json
         with open(arquivo_json, "w", encoding="utf-8") as f:
@@ -410,27 +461,33 @@ def consulta_numero_nf_por_doc_cliente(arquivo_json):
     print("fim")
 
 
-def realiza_baixa_de_notas(df_notas, data_do_saque_mercado_livre):
-    # current_dir = os.path.dirname(os.path.abspath(__file__))
+def realiza_baixa_de_notas(df_notas, data_do_saque_mercado_livre, login):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     # headless = True
     # if "gugab" in current_dir or "gustavo" in current_dir:
     #     headless = False
 
-    headless = False
+    headless = True
     with sync_playwright() as p:
-        page = abre_site_webmais_e_login(p, headless)
+        browser = p.chromium.connect_over_cdp("http://localhost:9222")
+        context = browser.contexts[0]  # contexto persistente do perfil aberto
+        page = context.pages[0]
+
+        if login:
+            page = abre_site_webmais_e_login(page)
 
         page = navega_para_baixa_de_valores(page, data_do_saque_mercado_livre)
 
         # Confirma qualquer botão de confirmação do navegador.
         page.on('dialog', lambda dialog: dialog.accept())
 
-        for index, row in df_notas.iterrows():
+        total = len(df_notas)
+        for i, (index, row) in enumerate(df_notas.iterrows(), start=1):
         # for index, row in df_notas.iloc[:4].iterrows():
 
             if row['baixa_valor_nota'] == row['baixa_valor_mercado_pago'] == row['baixa_valor_frete'] == 1:
-                logging.info(f"NF {row['Nota']} já baixada anteriormente.")
+                logging.info(f"{i} de {total} - NF {row['Nota']} já baixada anteriormente.")
                 continue
 
-            page, row = lanca_baixa_de_valores(page, row)
-            logging.info(f"Baixa realizada para a nf {row['Nota']}.")
+            page, row = lanca_baixa_de_valores(page, row, data_do_saque_mercado_livre)
+            logging.info(f"{i} de {total} - Baixa realizada para a nf {row['Nota']}.")

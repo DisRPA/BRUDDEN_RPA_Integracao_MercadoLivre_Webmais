@@ -27,6 +27,7 @@ def get_user_id(ACCESS_TOKEN):
     else:
         print(f"Erro ao obter User ID: {response.text}")
 
+
 def consulta_teste(ACCESS_TOKEN):
     # URL para obter produtos ativos (à venda)
 
@@ -222,3 +223,7 @@ if __name__ == "__main__":
     print(response)
 
     print("fim")
+
+
+if __name__ == "__main__":
+    consulta_teste("APP_USR-612439810072537-080417-33bdb91edb08193efa611c96d9a0ee96-276359269")

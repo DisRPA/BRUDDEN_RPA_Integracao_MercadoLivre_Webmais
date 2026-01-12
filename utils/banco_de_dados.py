@@ -90,6 +90,50 @@ def inserir_na_tabela(dados: pd.DataFrame, tabela="vendas_mercado_livre"):
         raise
 
 
+def inserir_ou_atualizar_vendas(dados: pd.DataFrame, tabela="vendas_mercado_livre"):
+    conn = criar_conexao()
+    cursor = conn.cursor()
+
+    try:
+        for _, row in dados.iterrows():
+            # Primeiro: INSERT OR IGNORE
+            insert_query = f"""
+            INSERT OR IGNORE INTO {tabela} 
+            ("Nome NF", Nota, Valor, Banco, "Frete/Taxa", "Mercado Pago", "Order_ID ML", 
+             "Tipo de Doc", "No. Doc", "Cod. Cliente WebMais", "No. Pedido WebMais", OBS)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            insert_values = tuple(row[col] if col in row else None for col in [
+                "Nome NF", "Nota", "Valor", "Banco", "Frete/Taxa", "Mercado Pago",
+                "Order_ID ML", "Tipo de Doc", "No. Doc", "Cod. Cliente WebMais",
+                "No. Pedido WebMais", "OBS"
+            ])
+            cursor.execute(insert_query, insert_values)
+
+            # Segundo: UPDATE para sobrescrever campos (exceto os de controle)
+            update_query = f"""
+            UPDATE {tabela}
+            SET Valor=?, Banco=?, "Frete/Taxa"=?, "Mercado Pago"=?, "Order_ID ML"=?, 
+                "Tipo de Doc"=?, "No. Doc"=?, "Cod. Cliente WebMais"=?, "No. Pedido WebMais"=?, OBS=?
+            WHERE "Nome NF"=? AND Nota=?
+            """
+            update_values = tuple(row[col] if col in row else None for col in [
+                "Valor", "Banco", "Frete/Taxa", "Mercado Pago", "Order_ID ML",
+                "Tipo de Doc", "No. Doc", "Cod. Cliente WebMais",
+                "No. Pedido WebMais", "OBS"
+            ]) + (row["Nome NF"], row["Nota"])
+            cursor.execute(update_query, update_values)
+
+        conn.commit()
+        logging.info(f"{len(dados)} registros inseridos/atualizados com sucesso!")
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"Erro ao inserir/atualizar dados: {e}")
+        raise
+    finally:
+        conn.close()
+
+
 def atualizar_tabela_com_df_campos_existentes(df, tabela="vendas_mercado_livre"):
     conn = None
     try:
