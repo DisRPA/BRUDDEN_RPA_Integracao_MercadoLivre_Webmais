@@ -2,7 +2,7 @@ import requests
 from utils.ml_autenticacao import atualizar_token_com_refresh_token
 import os
 import json
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 
@@ -188,9 +188,9 @@ if __name__ == "__main__":
     else:
         expiration_dt = datetime.fromisoformat(expiration_str)
         if expiration_dt.tzinfo is None:
-            expiration_dt = expiration_dt.replace(tzinfo=UTC)
+            expiration_dt = expiration_dt.replace(tzinfo=timezone.utc)
 
-        if datetime.now(UTC) > expiration_dt:
+        if datetime.now(timezone.utc) > expiration_dt:
             atualizar_token_com_refresh_token()
             print("Token ML atualizado!!")
 

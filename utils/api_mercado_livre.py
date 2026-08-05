@@ -80,7 +80,7 @@ def get_order_by_id(ACCESS_TOKEN, order_id):
     # Fazer requisição para obter orders
     for tentativa in range(3):
         try:
-            response = requests.get(API_URL, headers=headers, timeout=10)
+            response = requests.get(API_URL, headers=headers, timeout=30)
             response.raise_for_status()
             return response.json()
         except (requests.exceptions.RequestException, requests.exceptions.ConnectTimeout) as e:
@@ -173,7 +173,7 @@ def consulta_dados_cliente(ACCESS_TOKEN, order_id):
                 raise e
 
 
-def consulta_pedido_por_pedido(ACCESS_TOKEN, df_pedidos, period_key):
+def consulta_pedido_por_pedido(ACCESS_TOKEN, df_pedidos, period_key, sufix=""):
     all_orders = []  # Lista para armazenar os JSONs retornados
     all_relatorio = []
     relatorio = {}
@@ -282,14 +282,14 @@ def consulta_pedido_por_pedido(ACCESS_TOKEN, df_pedidos, period_key):
         sleep(0.2)
 
     # Salvar o resultado em um arquivo JSON
-    with open(f"../dados/pedidos_{period_key}.json", "w", encoding="utf-8") as f:
+    with open(f"../dados/pedidos_{period_key}{sufix}.json", "w", encoding="utf-8") as f:
         json.dump(all_orders, f, ensure_ascii=False, indent=4, default=convert_numpy)
 
     # Salvar o resultado em um arquivo JSON
-    with open(f"../dados/dados_relatorio_{period_key}.json", "w", encoding="utf-8") as f:
+    with open(f"../dados/dados_relatorio_{period_key}{sufix}.json", "w", encoding="utf-8") as f:
         json.dump(all_relatorio, f, ensure_ascii=False, indent=4, default=convert_numpy)
 
-    print(f"Arquivo pedidos_{period_key}.json e dados_relatorio_{period_key}.json salvos com sucesso!")
+    print(f"Arquivo pedidos_{period_key}{sufix}.json e dados_relatorio_{period_key}{sufix}.json salvos com sucesso!")
 
 
 def get_order_by_period(ACCESS_TOKEN, period_key):
@@ -304,7 +304,7 @@ def get_order_by_period(ACCESS_TOKEN, period_key):
     # Fazer requisição para obter orders por periodo
     for tentativa in range(3):
         try:
-            response = requests.get(API_URL, headers=headers, timeout=10)
+            response = requests.get(API_URL, headers=headers, timeout=30)
             response.raise_for_status()
             return response.json()
         except (requests.exceptions.RequestException, requests.exceptions.ConnectTimeout) as e:

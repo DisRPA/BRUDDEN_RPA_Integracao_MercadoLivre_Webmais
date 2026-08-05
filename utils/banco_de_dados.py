@@ -60,13 +60,25 @@ def criar_tabela_vendas_mercado_livre():
             'No. Doc' TEXT,
             'Cod. Cliente WebMais' TEXT,
             'No. Pedido WebMais' TEXT,
-            OBS TEXT, 
-            baixa_valor_nota INTEGER DEFAULT (0) NOT NULL, 
-            baixa_valor_mercado_pago INTEGER DEFAULT (0) NOT NULL, 
+            OBS TEXT,
+            baixa_valor_nota INTEGER DEFAULT (0) NOT NULL,
+            baixa_valor_mercado_pago INTEGER DEFAULT (0) NOT NULL,
             baixa_valor_frete INTEGER DEFAULT (0) NOT NULL,
-            UNIQUE('Nome NF', Nota) ON CONFLICT REPLACE
+            erro INTEGER DEFAULT (0) NOT NULL,
+            descricao_erro TEXT,
+            UNIQUE('Nome NF', Nota, 'Order_ID ML') ON CONFLICT REPLACE
         )
         """)
+
+        # Adicionar colunas erro e descricao_erro caso a tabela já exista sem elas
+        try:
+            cursor.execute("ALTER TABLE vendas_mercado_livre ADD COLUMN erro INTEGER DEFAULT (0) NOT NULL")
+        except sqlite3.OperationalError:
+            pass  # Coluna já existe
+        try:
+            cursor.execute("ALTER TABLE vendas_mercado_livre ADD COLUMN descricao_erro TEXT")
+        except sqlite3.OperationalError:
+            pass  # Coluna já existe
 
         conn.commit()
         # logging.info("Tabela 'vendas_mercado_livre' criada com sucesso!")

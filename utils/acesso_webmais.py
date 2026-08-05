@@ -83,128 +83,197 @@ def selecionar_nota(page, no_nota, segunda_tentativa=False):
     return page, segunda_tentativa
 
 
-def lanca_baixa_de_valores(page, row, data_do_saque_mercado_livre, segunda_tentativa=False):
+def _detectar_parcelas(iframe):
+    """Lê as linhas (títulos) listadas no iframe de liquidação por filtro.
 
-    # Selecionar nota
-    no_nota = row["Nota"]
-    page, segunda_tentativa = selecionar_nota(page, no_nota, segunda_tentativa=segunda_tentativa)
-
-    iframe = page.frame("centro2")  # Seleciona o iframe pelo id
-
-    # Valida o valor da nota
+    Uma NF pode ter sido dividida pelo WebMais em várias linhas/títulos da mesma
+    nota (ex.: uma nota de R$101,00 aparece como 2 linhas de R$50,50). Retorna uma
+    lista de dicts {id, pos (int), saldo (float), doc_or (str)} — uma por linha.
+    O campo de baixa de cada linha é campo{4*pos} e o checkbox é op{pos}.
+    """
     try:
-        valor_atual = iframe.input_value('input[name="campo4"]', timeout=1000).replace('.','')
-    except:
-        valor_atual = '0,00'
+        dados = iframe.eval_on_selector_all(
+            'tr.itens',
+            """rows => rows.map(tr => {
+                const cells = tr.querySelectorAll('td');
+                const docCell = cells[2];
+                return {
+                    id: tr.getAttribute('data-id'),
+                    pos: tr.getAttribute('data-pos'),
+                    saldo: tr.getAttribute('data-saldo'),
+                    doc_or: docCell ? (docCell.getAttribute('title') || docCell.textContent).trim() : ''
+                };
+            })""",
+        )
+    except Exception as e:
+        logging.warning(f"Falha ao detectar linhas da nota no WebMais: {e}")
+        return []
 
-    valor_total_nota = round(float(row["Valor"]), 2)
-    if row["baixa_valor_nota"] == 1:
-        valor_total_nota -= round(float(row["Banco"]), 2)
-    if row["baixa_valor_mercado_pago"] == 1:
-        valor_total_nota -= round(float(row["Mercado Pago"]), 2)
-    if row["baixa_valor_frete"] == 1:
-        valor_total_nota -= round(float(row["Frete/Taxa"]), 2)
-    valor_pendente = f"{abs(valor_total_nota):.2f}".replace(".", ",")
+    parcelas = []
+    for d in dados:
+        try:
+            parcelas.append({
+                'id': d['id'],
+                'pos': int(d['pos']),
+                'saldo': float(d['saldo']),
+                'doc_or': (d['doc_or'] or '').strip(),
+            })
+        except (TypeError, ValueError):
+            continue
+    return parcelas
 
-    if valor_atual != valor_pendente and not segunda_tentativa:
-        segunda_tentativa = True
-        page, row = lanca_baixa_de_valores(page, row, data_do_saque_mercado_livre, segunda_tentativa=segunda_tentativa)
-    elif valor_atual != valor_pendente:
-        logging.error(f"Divergência no valor total da nota {no_nota} - Pendente {valor_pendente} - valor no sistema {valor_atual}")
-        return page, row
 
+def _ratear_centavos(total_cent, pesos_cent):
+    """Rateia total_cent (int, em centavos) proporcionalmente a pesos_cent (lista de int).
+
+    Garante soma exata: distribui a sobra de centavos somando 1 centavo às linhas
+    de maior resto fracionário (o "1 a mais numa linha, 1 a menos noutra").
+    """
+    n = len(pesos_cent)
+    soma = sum(pesos_cent)
+    if n == 0 or soma <= 0:
+        return [0] * n
+    exatos = [total_cent * p / soma for p in pesos_cent]
+    base = [int(e) for e in exatos]
+    resto = int(total_cent - sum(base))
+    ordem = sorted(range(n), key=lambda i: exatos[i] - base[i], reverse=True)
+    for k in range(resto):
+        base[ordem[k % n]] += 1
+    return base
+
+
+def lanca_baixa_de_valores(page, row, data_do_saque_mercado_livre):
+
+    no_nota = row["Nota"]
 
     numero_conta_bradesco = "1"  # Conta do valor "BANCO"
     numero_conta_despesa_frete_e_taxa = "5"   # Conta do valor "Frete/Taxa"
     numero_conta_despesa_mercado_pago = "22"  # Conta do valor "Mercado Pago"
 
-    page.fill('#txtDataBaseCom', "")
-    page.fill('#txtDataBaseCom', data_do_saque_mercado_livre)
+    def _valor(coluna):
+        v = row[coluna]
+        return round(float(v), 2) if pd.notna(v) else 0.0
 
-    # Se não foi dado baixa do valor nota
-    # valor_banco = f"{row["Banco"]:.2f}".replace(".", ",")
-    valor_banco = f"{row["Banco"]:.2f}".replace(".", ",")
-    if row['baixa_valor_nota'] == 0 and valor_banco != '0,00':
-        # Banco BRADESCO Feso  para o valor a receber
+    # Componentes da nota, na ordem de baixa (coluna do valor, conta, flag de baixa).
+    componentes_def = [
+        ("Banco", numero_conta_bradesco, "baixa_valor_nota"),
+        ("Mercado Pago", numero_conta_despesa_mercado_pago, "baixa_valor_mercado_pago"),
+        ("Frete/Taxa", numero_conta_despesa_frete_e_taxa, "baixa_valor_frete"),
+    ]
+
+    # Componente de valor 0,00 não gera lançamento: marca como já baixado.
+    for coluna_valor, _, flag_col in componentes_def:
+        if _valor(coluna_valor) == 0:
+            row[flag_col] = 1
+
+    # Componentes ainda pendentes (flag 0 e valor != 0).
+    componentes = [
+        (coluna_valor, conta, flag_col, _valor(coluna_valor))
+        for (coluna_valor, conta, flag_col) in componentes_def
+        if row[flag_col] == 0
+    ]
+    if not componentes:
+        atualizar_tabela_com_df_campos_existentes(pd.DataFrame([row]))
+        return page, row
+
+    total_componentes = round(sum(v for *_, v in componentes), 2)
+
+    # Seleciona a nota e detecta as linhas (títulos). A NF pode ter sido dividida em
+    # N linhas no WebMais; cada linha tem seu próprio campo de baixa (campo{4*pos}).
+    # Tenta o campo de busca '6' e, em fallback, o '1' (igual ao fluxo single-line).
+    parcelas = []
+    melhor = None  # (parcelas, total_saldos) da melhor tentativa, para a mensagem de erro
+    for segunda_tentativa in (False, True):
+        page, _ = selecionar_nota(page, no_nota, segunda_tentativa=segunda_tentativa)
+        iframe = page.frame("centro2")
+        encontradas = _detectar_parcelas(iframe)
+        if not encontradas:
+            continue
+        total_saldos = round(sum(p['saldo'] for p in encontradas), 2)
+        tolerancia = max(0.02, 0.01 * len(encontradas))
+        melhor = (encontradas, total_saldos)
+        if abs(total_saldos - total_componentes) <= tolerancia:
+            parcelas = encontradas
+            break
+
+    if not parcelas:
+        if melhor is None:
+            descricao = f"Nota {no_nota} não encontrada no WebMais."
+        else:
+            enc, total_saldos = melhor
+            descricao = (f"Divergência no valor total da nota {no_nota} - "
+                         f"Pendente {total_componentes:.2f} - saldo no sistema {total_saldos:.2f} "
+                         f"em {len(enc)} linha(s)").replace(".", ",")
+        logging.error(descricao)
+        row['erro'] = 1
+        row['descricao_erro'] = descricao
+        atualizar_tabela_com_df_campos_existentes(pd.DataFrame([row]))
+        return page, row
+
+    # Todas as linhas têm que pertencer ao mesmo Doc. Or. (mesma nota); senão é ambíguo.
+    docs = {p['doc_or'] for p in parcelas if p['doc_or']}
+    if len(docs) > 1:
+        descricao = f"Nota {no_nota}: linhas de Doc. Or. diferentes {docs}; baixa não automática."
+        logging.error(descricao)
+        row['erro'] = 1
+        row['descricao_erro'] = descricao
+        atualizar_tabela_com_df_campos_existentes(pd.DataFrame([row]))
+        return page, row
+
+    if len(parcelas) > 1:
+        logging.info(f"Nota {no_nota}: dividida em {len(parcelas)} linhas no WebMais (Doc. Or. {docs}).")
+
+    # Chegou aqui: tentativa válida. Limpa erro de tentativas anteriores.
+    row['erro'] = 0
+    row['descricao_erro'] = None
+
+    # Baixa cada componente pendente. Entre baixas a página recarrega e os saldos das
+    # linhas mudam, então as linhas são redetectadas a cada componente. O último
+    # componente absorve o saldo restante de cada linha (fechamento exato em centavos).
+    for k, (coluna_valor, conta, flag_col, valor) in enumerate(componentes):
+        iframe = page.frame("centro2")
+        parcelas_atuais = _detectar_parcelas(iframe)
+        if not parcelas_atuais:
+            descricao = f"Nota {no_nota}: linhas sumiram antes de baixar {coluna_valor}."
+            logging.error(descricao)
+            row['erro'] = 1
+            row['descricao_erro'] = descricao
+            atualizar_tabela_com_df_campos_existentes(pd.DataFrame([row]))
+            return page, row
+
+        saldos_cent = [round(p['saldo'] * 100) for p in parcelas_atuais]
+        ultimo = (k == len(componentes) - 1)
+        if ultimo:
+            # Último componente: absorve todo o saldo restante de cada linha.
+            valores_cent = saldos_cent
+        else:
+            valores_cent = _ratear_centavos(round(valor * 100), saldos_cent)
+
+        if len(parcelas_atuais) > 1:
+            logging.info(f"Nota {no_nota}: {coluna_valor} rateado por linha (centavos): {valores_cent}")
+
+        page.fill('#txtDataBaseCom', "")
+        page.fill('#txtDataBaseCom', data_do_saque_mercado_livre)
+
         page.fill('#txtConta2', "")
-        page.fill('#txtConta2', numero_conta_bradesco)
+        page.fill('#txtConta2', conta)
         page.press("#txtConta2", "Enter")
 
-        # iframe.eval_on_selector('input[name="campo4"]', 'el => { el.value = ""; }')
-        iframe.fill('input[name="campo4"]', "")
-        iframe.fill('input[name="campo4"]', valor_banco)
-
-        iframe.click('input#op1')
+        for parcela, v_cent in zip(parcelas_atuais, valores_cent):
+            valor_str = f"{v_cent / 100:.2f}".replace(".", ",")
+            campo = f'input[name="campo{4 * parcela["pos"]}"]'
+            iframe.fill(campo, "")
+            iframe.fill(campo, valor_str)
+            iframe.click(f'input#op{parcela["pos"]}')
 
         page.click('#btnBaixa')
         page = aguardar_pag_carregar_sem_networkidle(page)
         sleep(1)
-        row['baixa_valor_nota'] = 1
 
-        df_row = pd.DataFrame([row])
-        atualizar_tabela_com_df_campos_existentes(df_row)
+        row[flag_col] = 1
+        atualizar_tabela_com_df_campos_existentes(pd.DataFrame([row]))
 
-    page.fill('#txtDataBaseCom', "")
-    page.fill('#txtDataBaseCom', data_do_saque_mercado_livre)
-
-    # Se não foi dado baixa do valor do Mercado Livre
-    valor_mercado_pago = f"{row["Mercado Pago"]:.2f}".replace(".", ",")
-    if valor_mercado_pago == '0,00':
-        row['baixa_valor_mercado_pago'] = 1
-
-    if row['baixa_valor_mercado_pago'] == 0 and valor_mercado_pago != '0,00':
-        # Banco BRADESCO Feso  para o valor a receber
-        page.fill('#txtConta2', "")
-        page.fill('#txtConta2', numero_conta_despesa_mercado_pago)
-        page.press("#txtConta2", "Enter")
-
-        # iframe.eval_on_selector('input[name="campo4"]', 'el => { el.value = ""; }')
-        iframe.fill('input[name="campo4"]', "")
-        iframe.fill('input[name="campo4"]', valor_mercado_pago)
-
-        iframe.click('input#op1')
-
-        page.click('#btnBaixa')
-        page = aguardar_pag_carregar_sem_networkidle(page)
-        sleep(1)
-        row['baixa_valor_mercado_pago'] = 1
-
-        df_row = pd.DataFrame([row])
-        atualizar_tabela_com_df_campos_existentes(df_row)
-
-
-    page.fill('#txtDataBaseCom', "")
-    page.fill('#txtDataBaseCom', data_do_saque_mercado_livre)
-
-    # Se não foi dado baixa do valor do Frete
-    valor_frete_e_taxa = f"{row["Frete/Taxa"]:.2f}".replace(".", ",")
-    if valor_frete_e_taxa == '0,00':
-        row['baixa_valor_frete'] = 1
-
-    if row['baixa_valor_frete'] == 0 and valor_frete_e_taxa != '0,00':
-        # Banco BRADESCO Feso  para o valor a receber
-        page.fill('#txtConta2', "")
-        page.fill('#txtConta2', numero_conta_despesa_frete_e_taxa)
-        page.press("#txtConta2", "Enter")
-
-        # iframe.eval_on_selector('input[name="campo4"]', 'el => { el.value = ""; }')
-        iframe.fill('input[name="campo4"]', "")
-        iframe.fill('input[name="campo4"]', valor_frete_e_taxa)
-
-        iframe.click('input#op1')
-
-        page.click('#btnBaixa')
-        page = aguardar_pag_carregar_sem_networkidle(page)
-        sleep(1)
-
-        row['baixa_valor_frete'] = 1
-
-        df_row = pd.DataFrame([row])
-        atualizar_tabela_com_df_campos_existentes(df_row)
-
-
-    df_row = pd.DataFrame([row])
-    atualizar_tabela_com_df_campos_existentes(df_row)
+    atualizar_tabela_com_df_campos_existentes(pd.DataFrame([row]))
     return page, row
 
 
@@ -326,9 +395,9 @@ def abre_site_webmais_e_login(page):
 
 
 def consulta_cod_cliente(page, no_doc):
-    page.fill('#pscnpjcpf', "")
-    page.fill('#pscnpjcpf', no_doc)
-    page.press("#pscnpjcpf", "Enter")
+    page.fill('#cnpjCpf', "")
+    page.fill('#cnpjCpf', no_doc)
+    page.press("#cnpjCpf", "Enter")
     sleep(0.3)
     page.click('#btnPesquisar')
     sleep(0.3)
@@ -461,7 +530,7 @@ def consulta_numero_nf_por_doc_cliente(arquivo_json):
     print("fim")
 
 
-def realiza_baixa_de_notas(df_notas, data_do_saque_mercado_livre, login):
+def realiza_baixa_de_notas(df_notas, data_do_saque_mercado_livre):
     current_dir = os.path.dirname(os.path.abspath(__file__))
     # headless = True
     # if "gugab" in current_dir or "gustavo" in current_dir:
@@ -473,7 +542,9 @@ def realiza_baixa_de_notas(df_notas, data_do_saque_mercado_livre, login):
         context = browser.contexts[0]  # contexto persistente do perfil aberto
         page = context.pages[0]
 
-        if login:
+        page_url = page.url
+        if '/www/index.csp' in page_url:
+            logging.info("inicia abre site webmais e login")
             page = abre_site_webmais_e_login(page)
 
         page = navega_para_baixa_de_valores(page, data_do_saque_mercado_livre)
@@ -490,4 +561,11 @@ def realiza_baixa_de_notas(df_notas, data_do_saque_mercado_livre, login):
                 continue
 
             page, row = lanca_baixa_de_valores(page, row, data_do_saque_mercado_livre)
-            logging.info(f"{i} de {total} - Baixa realizada para a nf {row['Nota']}.")
+            if row.get('erro', 0) == 1:
+                logging.warning(f"{i} de {total} - Baixa NÃO realizada para a nf {row['Nota']}: {row.get('descricao_erro', '')}")
+            else:
+                logging.info(f"{i} de {total} - Baixa realizada para a nf {row['Nota']}.")
+
+        page.close()
+        context.close()
+        browser.close()

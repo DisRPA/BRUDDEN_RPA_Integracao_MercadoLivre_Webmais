@@ -8,7 +8,7 @@ from utils.api_mercado_livre import consulta_pedido_por_pedido, get_periodos, ge
 from utils.api_mercadolivre_testes import get_nf_by_order_id, get_all_shipmentts_info
 from utils.acesso_webmais import consulta_numero_nf_por_doc_cliente
 import os
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 
 load_dotenv()
@@ -26,7 +26,7 @@ def cria_relatorio(ACCESS_TOKEN, period_key):
 
 
 def main(passo):
-    # period_keys = get_periodos(os.getenv("ML_ACCESSTOKEN_EXPIRATION"), 2)
+    # period_keys = get_periodos(os.getenv("ML_ACCESSTOKEN"), 2)
 
     if passo != 2:
         expiration_str = os.getenv("ML_ACCESSTOKEN_EXPIRATION")
@@ -36,9 +36,9 @@ def main(passo):
         else:
             expiration_dt = datetime.fromisoformat(expiration_str)
             if expiration_dt.tzinfo is None:
-                expiration_dt = expiration_dt.replace(tzinfo=UTC)
+                expiration_dt = expiration_dt.replace(tzinfo=timezone.utc)
 
-            if datetime.now(UTC) > expiration_dt:
+            if datetime.now(timezone.utc) > expiration_dt:
                 atualizar_token_com_refresh_token()
                 print("Token ML atualizado!!")
 
@@ -64,7 +64,7 @@ def main(passo):
     # Pega os períodos
     # period_keys = get_periodos(ACCESS_TOKEN, 2)
     # print(period_keys)
-    period_keys = ['2025-12-01']
+    period_keys = ['2026-06-01']
 
     for period_key in period_keys:
 
@@ -77,12 +77,16 @@ def main(passo):
         arquivo_excel = f"../dados/Vendas_Online_{period_key}.xlsx"  # Nome do arquivo Excel de saída
 
         if passo != 1:
+            # Passo 2 !!!
             # Cria o json consolidado
             # google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-playwright
             # https://erp2.webmaissistemas.com.br/csp/kelt/system/www/index.csp
 
+            print("consolida dados dos pedidos!!")
             consilida_dados_dos_pedidos(arquivo_json, arquivo_json_consolidado)
+            print("consulta numero nf por doc")
             consulta_numero_nf_por_doc_cliente(arquivo_json_consolidado)
+            print("converte json para excel")
             converter_json_para_excel(arquivo_json_consolidado, arquivo_excel)
 
 
@@ -145,9 +149,10 @@ def main(passo):
 
 
 if __name__ == "__main__":
-
     # passo = 1 > consulta tudo no mercado livre
     # passo = 2 > Compila os dados
+    # >> iniciar pelo termina:
+    # google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-playwright --window-size=1380,820 --window-position=500,0 --no-first-run --no-default-browser-check --disable-features=MediaRouter,PrivacySandboxSettings4,Translate --disable-component-update --disable-sync https://erp2.webmaissistemas.com.br/csp/kelt/system/www/index.csp
     # passo com outro valor, executa ambos
     passo = 2
 

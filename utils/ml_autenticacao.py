@@ -1,5 +1,5 @@
 from utils.dotenv_utils import set_env_value
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 import requests
 import json
 import time
@@ -16,6 +16,8 @@ API_TEST_URL = "https://api.mercadolibre.com/users/me"
 
 # Consuta feso para gerar o token
 # https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=612439810072537&redirect_uri=https://bubblebot.com.br/php/logger.php
+# Consultar em
+# https://bubblebot.com.br/php/ver_log.php
 
 # Trocar o código de autorização pelo access_token
 def get_access_token(auth_code):
@@ -59,7 +61,6 @@ def refresh_access_token(refresh_token):
         "grant_type": "refresh_token",
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
-        "scope": "read",
         "refresh_token": refresh_token
     }
     response = requests.post(TOKEN_URL, data=data)
@@ -68,7 +69,8 @@ def refresh_access_token(refresh_token):
     if "access_token" in response_data:
         return {
             "access_token": response_data["access_token"],
-            "expires_in": response_data["expires_in"]
+            "expires_in": response_data["expires_in"],
+            "refresh_token": response_data["refresh_token"]
         }
     else:
         raise Exception(f"Erro ao renovar token: {response_data}")
@@ -80,17 +82,20 @@ def atualizar_token_com_refresh_token():
     new_token_data = refresh_access_token(refresh_token)
     new_access_token = new_token_data["access_token"]
     set_env_value("ML_ACCESSTOKEN", new_access_token)
+    new_refresh_token = new_token_data["refresh_token"]
+    set_env_value("ML_REFRESH_TOKEN", new_refresh_token)
 
     token_expiration = new_token_data["expires_in"]
     # Subtrai 20 minutos de margem (1200s)
-    expiration_time = datetime.now(UTC) + timedelta(seconds=new_token_data["expires_in"] - 1200)
+    expiration_time = datetime.now(timezone.utc) + timedelta(seconds=new_token_data["expires_in"] - 1200)
     expiration_str = expiration_time.isoformat()
     set_env_value("ML_ACCESSTOKEN_EXPIRATION", expiration_str)
 
 # Exemplo de uso
 if __name__ == "__main__":
 
-    get_access_token("TG-68c1d0bc92779800016c7fda-276359269")
+    # Só usar se precisar gerar um code novo para poder gerar novos access_token e refresh_token
+    # get_access_token("TG-69e11d7b9526c80001530b25-276359269")
 
     expiration_str = os.getenv("ML_ACCESSTOKEN_EXPIRATION")
     if not expiration_str:
@@ -99,9 +104,9 @@ if __name__ == "__main__":
     else:
         expiration_dt = datetime.fromisoformat(expiration_str)
         if expiration_dt.tzinfo is None:
-            expiration_dt = expiration_dt.replace(tzinfo=UTC)
+            expiration_dt = expiration_dt.replace(tzinfo=timezone.utc)
 
-        if datetime.now(UTC) > expiration_dt:
+        if datetime.now(timezone.utc) > expiration_dt:
             atualizar_token_com_refresh_token()
             print("Token ML atualizado!!")
 
