@@ -146,7 +146,7 @@ def lanca_baixa_de_valores(page, row, data_do_saque_mercado_livre):
 
     no_nota = row["Nota"]
 
-    numero_conta_bradesco = "1"  # Conta do valor "BANCO"
+    numero_conta_bradesco = "1"  # Conta do valor "BANCO"  "24"
     numero_conta_despesa_frete_e_taxa = "5"   # Conta do valor "Frete/Taxa"
     numero_conta_despesa_mercado_pago = "22"  # Conta do valor "Mercado Pago"
 
