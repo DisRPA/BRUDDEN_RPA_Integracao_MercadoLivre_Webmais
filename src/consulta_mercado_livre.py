@@ -7,8 +7,10 @@ from utils.tratamento_de_dados import cria_dataframe_com_dados_dos_pedidos, cons
 from utils.api_mercado_livre import consulta_pedido_por_pedido, get_periodos, get_user_id, get_order_by_period, consulta_dados_cliente, get_billing_info
 from utils.api_mercadolivre_testes import get_nf_by_order_id, get_all_shipmentts_info
 from utils.acesso_webmais import consulta_numero_nf_por_doc_cliente
+from utils.relatorio_para_cliente import preparar_relatorio_para_o_cliente
 import os
 from datetime import datetime, timezone
+import subprocess
 
 
 load_dotenv()
@@ -64,7 +66,7 @@ def main(passo):
     # Pega os períodos
     # period_keys = get_periodos(ACCESS_TOKEN, 2)
     # print(period_keys)
-    period_keys = ['2026-06-01']
+    period_keys = ['2026-08-01']
 
     for period_key in period_keys:
 
@@ -74,6 +76,9 @@ def main(passo):
 
         arquivo_json = f"../dados/dados_relatorio_{period_key}.json"  # Substitua pelo caminho do seu arquivo JSON
         arquivo_json_consolidado = f"../dados/dados_relatorio_consolidado_{period_key}.json"  # Substitua pelo caminho do seu arquivo JSON
+        # O consolidado guarda TUDO (auditoria). O "para_cliente" é o consolidado já
+        # sem as notas baixadas e com os avisos na coluna OBS - é ele que vira Excel.
+        arquivo_json_para_cliente = f"../dados/dados_relatorio_para_cliente_{period_key}.json"
         arquivo_excel = f"../dados/Vendas_Online_{period_key}.xlsx"  # Nome do arquivo Excel de saída
 
         if passo != 1:
@@ -82,12 +87,25 @@ def main(passo):
             # google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-playwright
             # https://erp2.webmaissistemas.com.br/csp/kelt/system/www/index.csp
 
+            proc = subprocess.Popen(
+                "bash -ic 'brudden'",
+                shell=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            input("Clique quando o browser abrir:")
+
+
             print("consolida dados dos pedidos!!")
             consilida_dados_dos_pedidos(arquivo_json, arquivo_json_consolidado)
             print("consulta numero nf por doc")
             consulta_numero_nf_por_doc_cliente(arquivo_json_consolidado)
+            print("prepara relatorio para o cliente")
+            preparar_relatorio_para_o_cliente(arquivo_json_consolidado, arquivo_json_para_cliente, period_key)
             print("converte json para excel")
-            converter_json_para_excel(arquivo_json_consolidado, arquivo_excel)
+            converter_json_para_excel(arquivo_json_para_cliente, arquivo_excel)
 
 
 
