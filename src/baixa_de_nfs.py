@@ -255,24 +255,45 @@ def _chaves_unicas(df):
     }
 
 
-def logar_composicao_da_fila(df_banco, df_fila, df_sem_valores, excel_file_name=None):
+def _mascara_no_excel(df, chaves_excel):
+    """True para cada linha de df cuja chave única está no Excel da rodada."""
+    return pd.Series(
+        [
+            tuple(_formatar_identificador(registro[coluna]) for coluna in COLUNAS_CHAVE_DUPLICIDADE)
+            in chaves_excel
+            for _, registro in df.iterrows()
+        ],
+        index=df.index,
+        dtype=bool,
+    )
+
+
+def logar_composicao_da_fila(df_excel, df_banco_do_excel, df_fila, df_sem_valores,
+                             df_pendentes_fora, excel_file_name):
     """Explica no log quem entrou e quem ficou de fora da fila de baixa.
 
-    A baixa lê o banco inteiro, não o Excel da rodada. Sem este resumo, linhas do
-    arquivo que já foram baixadas em rodadas anteriores somem em silêncio e notas
-    velhas com erro aparecem do nada - foi o que confundiu a conferência de set/2026.
+    A base da baixa é o Excel da rodada: as notas dele batem com o total recebido
+    no saque. Notas pendentes de outros arquivos não entram - só são avisadas aqui,
+    para serem resolvidas manualmente.
     """
-    concluidos = len(df_banco) - len(df_fila) - len(df_sem_valores)
+    concluidos = len(df_banco_do_excel) - len(df_fila) - len(df_sem_valores)
+    nao_gravadas = len(df_excel) - len(df_banco_do_excel)
     logging.info(
-        f"Fila de baixa: {len(df_fila)} registro(s). "
-        f"Banco tem {len(df_banco)} registro(s); "
+        f"Arquivo '{excel_file_name}': {len(df_excel)} linha(s). "
+        f"Fila de baixa: {len(df_fila)} registro(s); "
         f"{concluidos} já concluído(s) em rodadas anteriores (pulados)."
     )
+
+    if nao_gravadas > 0:
+        logging.warning(
+            f"{nao_gravadas} linha(s) do arquivo não estão no banco. "
+            "Execute o tipo = 1 antes do tipo = 2."
+        )
 
     com_erro = df_fila[df_fila['erro'] == 1]
     if not com_erro.empty:
         logging.info(
-            f"{len(com_erro)} registro(s) voltaram por erro de rodada anterior: "
+            f"{len(com_erro)} registro(s) do arquivo voltaram por erro de rodada anterior: "
             f"notas {_listar_notas(com_erro)}"
         )
 
@@ -282,48 +303,38 @@ def logar_composicao_da_fila(df_banco, df_fila, df_sem_valores, excel_file_name=
             f"notas {_listar_notas(df_sem_valores)}"
         )
 
-    if not excel_file_name:
-        return
-
-    try:
-        df_excel = ler_excel_de_lancamento(excel_file_name)
-    except Exception as e:
+    if not df_pendentes_fora.empty:
         logging.warning(
-            f"Não foi possível comparar a fila com o arquivo '{excel_file_name}': {e}"
-        )
-        return
-
-    chaves_fila = _chaves_unicas(df_fila) | _chaves_unicas(df_sem_valores)
-    fora_da_fila = df_excel[[
-        tuple(_formatar_identificador(registro[coluna]) for coluna in COLUNAS_CHAVE_DUPLICIDADE)
-        not in chaves_fila
-        for _, registro in df_excel.iterrows()
-    ]]
-
-    logging.info(
-        f"Arquivo '{excel_file_name}': {len(df_excel)} linha(s); "
-        f"{len(df_excel) - len(fora_da_fila)} na fila; "
-        f"{len(fora_da_fila)} fora da fila (já baixada(s) antes)."
-    )
-    if not fora_da_fila.empty:
-        logging.info(
-            f"Linhas do arquivo fora da fila: notas {_listar_notas(fora_da_fila)}"
+            f"{len(df_pendentes_fora)} nota(s) pendente(s) de outros arquivos ficaram "
+            f"fora da fila (resolver manualmente): notas {_listar_notas(df_pendentes_fora)}"
         )
 
 
-def ler_dados_do_banco_e_realizar_baixas(data_do_saque_mercado_livre, excel_file_name=None):
+def ler_dados_do_banco_e_realizar_baixas(data_do_saque_mercado_livre, excel_file_name):
+    if not excel_file_name:
+        raise ValueError(
+            "Informe o arquivo Excel da rodada. A baixa usa só as notas desse arquivo."
+        )
+
+    df_excel = ler_excel_de_lancamento(excel_file_name)
+    chaves_excel = _chaves_unicas(df_excel)
+
     # Ler dados do banco para df
     df_banco = consulta_tabela('vendas_mercado_livre')
 
-    # filtra apenas registros não lançados
-    df_mercado_livre = df_banco[
-        ~(
-                (df_banco['baixa_valor_nota'] == 1) &
-                (df_banco['baixa_valor_mercado_pago'] == 1) &
-                (df_banco['baixa_valor_frete'] == 1) &
-                (df_banco['erro'] == 0)
-        )
-    ]
+    # registros não lançados (pendentes ou com erro)
+    pendentes = ~(
+            (df_banco['baixa_valor_nota'] == 1) &
+            (df_banco['baixa_valor_mercado_pago'] == 1) &
+            (df_banco['baixa_valor_frete'] == 1) &
+            (df_banco['erro'] == 0)
+    )
+
+    # A base da baixa é o Excel: só entram as notas do arquivo da rodada
+    no_excel = _mascara_no_excel(df_banco, chaves_excel)
+    df_banco_do_excel = df_banco[no_excel]
+    df_pendentes_fora = df_banco[pendentes & ~no_excel]
+    df_mercado_livre = df_banco[pendentes & no_excel]
 
     # filtra registros com valores null
     sem_valores = (
@@ -335,7 +346,10 @@ def ler_dados_do_banco_e_realizar_baixas(data_do_saque_mercado_livre, excel_file
     df_sem_valores = df_mercado_livre[sem_valores]
     df_mercado_livre = df_mercado_livre[~sem_valores].copy()
 
-    logar_composicao_da_fila(df_banco, df_mercado_livre, df_sem_valores, excel_file_name)
+    logar_composicao_da_fila(
+        df_excel, df_banco_do_excel, df_mercado_livre, df_sem_valores,
+        df_pendentes_fora, excel_file_name,
+    )
 
     df_mercado_livre['No. Doc'] = df_mercado_livre['No. Doc'].astype(int)
 
@@ -347,8 +361,8 @@ def ler_dados_do_banco_e_realizar_baixas(data_do_saque_mercado_livre, excel_file
 
 def main(tipo):
 
-    excel_file_name = 'Vendas_Online_2026-08-01_AGOSTO.xlsx'
-    data_do_saque_mercado_livre = '15/09/2026'
+    excel_file_name = 'Vendas_Online_2026-09-01_Setembro.xlsx'
+    data_do_saque_mercado_livre = '04/11/2026'
 
     # gravar dados do Excel no banco
     if tipo == 1:
